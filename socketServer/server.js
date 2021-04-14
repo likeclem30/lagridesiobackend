@@ -2,7 +2,8 @@ const io = require('socket.io')
 const request = require('request')
 const socketUsers = require('./assets/socketUser')
 const driverModel = require('../models/driver');
-const router = require('./router')
+const router = require('./router');
+const helpers = require('./assets/helpers');
 const socket = {}
 
 //create socket.io server
@@ -42,7 +43,11 @@ socket.createServer = (httpServer) => {
          return next(new Error('Unauthorized'));
       }
       //check the token with the auth service
-      let checkToken = await socket.verifyBearerToken(userToken)
+      let checkToken = await helpers.makeHTTPRequest({
+         uri: 'http://taxiusersbackend-microservices.apps.waaron.com/api/verify/',
+         method: 'GET', headers: { "Authorization": userToken }
+      })
+      // let checkToken = await socket.verifyBearerToken(userToken)
       console.log(checkToken)
       //if the token is invalid
       try {
@@ -93,11 +98,14 @@ socket.createServer = (httpServer) => {
          delete socketUsers.online[userData.token]
          // if the user is a driver
          if (userData.user_type === 'driver') {
+            console.log(socketUsers.online)
             //take a sleep for 10sec and wait
             await socket.takeASleep(10000)
             //if not reconnected
             if (!socketUsers.online[userData.token]) {
                //update the driver to off
+               console.log('setting Diver to offline')
+
                await driverModel.findOneAndUpdate({ user_id: userData.token },
                   { online: false, }, { new: true }).catch(e => ({ error: e }))
             }

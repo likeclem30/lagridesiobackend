@@ -23,6 +23,10 @@ const TripRequests = new Schema({
       enum: ["A", "B", "C", "D"],
       required: true
    },
+   ride_class_complete: {
+      type: Boolean,
+      default: false
+   },
    rider_compass: {
       type: String,
       required: true
@@ -104,7 +108,7 @@ const TripRatings = new Schema({
 //for rating
 const DriverWorkHours = new Schema({
    id: Schema.Types.ObjectId,
-   user_id: {
+   driver_id: {
       type: String,
       required: true
    },

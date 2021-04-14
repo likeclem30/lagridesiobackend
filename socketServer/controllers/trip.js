@@ -1,9 +1,10 @@
 const validator = require('validator')
 const helpers = require('../assets/helpers')
 const requestAction = require('../assets/requestAction')
-const tripRidersMethod = require('./trip_method/rider_method')
+const riderMethod = require('./trip_method/rider_method')
 const socketUser = require('../assets/socketUser')
 const driverMethod = require('./trip_method/driver_method')
+const notificationModel = require('../../models/notification')
 const tripModel = require('../../models/trip_request')
 const dbConnector = require('../../models/dbconnector')
 
@@ -24,6 +25,8 @@ trip.requestDriver = (ws, payload) => {
    let est_fare = helpers.getInputValueString(payload, 'est_fare')
    let est_time = helpers.getInputValueNumber(payload, 'est_time')
    let rideClass = helpers.getInputValueString(payload, 'class')
+   let classComplete = helpers.getInputValueString(payload, 'class_complete')
+   let riders = helpers.getInputValueArray(payload, 'riders')
 
    //check and validate the input
    if (isNaN(startLongitude) || isNaN(startLatitude)) {
@@ -64,6 +67,56 @@ trip.requestDriver = (ws, payload) => {
    if (["A", "B", "C", "D"].indexOf(rideClass) === -1) {
       return helpers.outputResponse(ws, { action: requestAction.inputError, error: "Invalid class" })
    }
+
+   if (classComplete) {
+      //check the class submitting
+      if (["B", "C", "D"].indexOf(classComplete) === -1) {
+         return helpers.outputResponse(ws, { action: requestAction.inputError, error: "Invalid class complete" })
+      }
+      //check if the class complete is not same with the class
+      if (payload.class !== payload.class_complete) {
+         return helpers.outputResponse(ws, { action: requestAction.inputError, error: "Class complete and Class do not match" })
+      }
+      //check if the riders are not submitted
+      if (!(riders instanceof Array) || riders.length === 0) {
+         return helpers.outputResponse(ws, { action: requestAction.inputError, error: "Riders data is required for ride complete" })
+      }
+      //check if the data not match
+      if (classComplete === "B" && riders.length !== 2) {
+         return helpers.outputResponse(ws, {
+            action: requestAction.inputError,
+            error: "Riders data for class B complete must be one and it's required"
+         })
+      }
+      //check if the data not match
+      if (classComplete === "C" && riders.length !== 3) {
+         return helpers.outputResponse(ws, {
+            action: requestAction.inputError,
+            error: "Riders data for class C complete must be two and it's required"
+         })
+      }
+      //check if the data not match
+      if (classComplete === "D" && riders.length !== 4) {
+         return helpers.outputResponse(ws, {
+            action: requestAction.inputError,
+            error: "Riders data for class D complete must be three and it's required"
+         })
+      }
+      //check if not all the data are submitted
+      for (let d of riders) {
+         if (!d.name || !d.phone || d.phone.length !== 11 || !d.rider_id) {
+            return helpers.outputResponse(ws, {
+               action: requestAction.inputError,
+               error: "Riders data must have valid name, phone and rider id"
+            })
+         }
+      }
+      payload.class = "A"
+      //add recommendation no
+      payload.accept_recommendation = "no"
+      payload.ride_class_complete = true
+   }
+
    //if there's no distance submitted, calculate the distance
    if (!payload.est_dst) {
       //add the distance to the payload
@@ -80,16 +133,16 @@ trip.requestDriver = (ws, payload) => {
    // do the trip request switch
    switch (rideClass) {
       case "A":
-         tripRidersMethod.RequestClassA(ws, payload, []);
+         riderMethod.RequestClassA(ws, payload, []);
          break;
       case "B":
-         tripRidersMethod.RequestClassB(ws, payload, []);
+         riderMethod.RequestClassB(ws, payload, []);
          break;
       case "C":
-         tripRidersMethod.RequestClassC(ws, payload, []);
+         riderMethod.RequestClassC(ws, payload, []);
          break;
       case "D":
-         tripRidersMethod.RequestClassD(ws, payload, []);
+         riderMethod.RequestClassD(ws, payload, []);
          break;
       default:
          helpers.outputResponse(ws, { action: requestAction.inputError, error: "Invalid request" })
@@ -388,29 +441,73 @@ trip.updateDestination = async (ws, payload) => {
    let endLon = helpers.getInputValueNumber(payload, 'end_lon')
    let endLat = helpers.getInputValueNumber(payload, 'end_lat')
    let rideClass = helpers.getInputValueString(payload, 'class')
+   let fare = helpers.getInputValueString(payload, 'est_fare')
+   let estTime = helpers.getInputValueNumber(payload, 'est_time')
+   let estDst = helpers.getInputValueNumber(payload, 'est_dst')
 
    //check the values
    if (!endLon || isNaN(endLon)) {
-      return helpers.outputResponse(ws, { action: requestAction.inputError, error: "A valid end longitude is required" })
+      return helpers.outputResponse(ws, {
+         action: requestAction.inputError,
+         error: "A valid end longitude is required"
+      })
    }
    //check the values
    if (!endLat || isNaN(endLat)) {
-      return helpers.outputResponse(ws, { action: requestAction.inputError, error: "A valid end latitude is required" })
+      return helpers.outputResponse(ws, {
+         action: requestAction.inputError,
+         error: "A valid end latitude is required"
+      })
    }
    //check address
    if (!endAddr || endAddr.length < 2) {
-      return helpers.outputResponse(ws, { action: requestAction.inputError, error: "A valid address is required" })
+      return helpers.outputResponse(ws, {
+         action: requestAction.inputError,
+         error: "A valid address is required"
+      })
    }
    if (!rideClass) {
-      return helpers.outputResponse(ws, { action: requestAction.inputError, error: "Ride class is required" })
+      return helpers.outputResponse(ws, {
+         action: requestAction.inputError,
+         error: "Ride class is required"
+      })
    }
    if (rideClass !== "A") {
-      return helpers.outputResponse(ws, { action: requestAction.inputError, error: `Feature not allowed for ${rideClass}. This is only allowed for class A` })
+      return helpers.outputResponse(ws, {
+         action: requestAction.inputError,
+         error: `Feature not allowed for ${rideClass}. This is only allowed for class A`
+      })
    }
    //check the trip id
    if (!trip_id || trip_id.length !== 24) {
-      return helpers.outputResponse(ws, { action: requestAction.inputError, error: "A valid trip id is required" })
+      return helpers.outputResponse(ws, {
+         action: requestAction.inputError,
+         error: "A valid trip id is required"
+      })
    }
+
+   if (!fare || fare.length < 2) {
+      return helpers.outputResponse(ws, {
+         action: requestAction.inputError,
+         error: "Estimated Fare not submitted"
+      })
+   }
+
+   if (!estTime || isNaN(estTime)) {
+      return helpers.outputResponse(ws, {
+         action: requestAction.inputError,
+         error: "Estimated est_time is required"
+      })
+   }
+
+   if (!estDst || isNaN(estDst)) {
+      return helpers.outputResponse(ws, {
+         action: requestAction.inputError,
+         error: "Estimated est_dst is required"
+      })
+   }
+
+
    //check the trip ID
    let getTrip = await tripModel.TripRequests.findOne({ _id: trip_id }).catch(e => ({ error: e }))
    //check if there's an error
@@ -435,6 +532,8 @@ trip.updateDestination = async (ws, payload) => {
       end_lat: getRider.end_lat,
       start_address: getRider.start_address,
       end_address: getRider.end_address,
+      est_time: getRider.est_time,
+      est_dst: getRider.est_dst
    }
 
    //update the distination
@@ -442,7 +541,9 @@ trip.updateDestination = async (ws, payload) => {
       $set: {
          'riders.0.end_lon': endLon,
          'riders.0.end_lat': endLat,
-         'riders.0.end_address': endAddr
+         'riders.0.end_address': endAddr,
+         'riders.0.est_time': estTime,
+         'riders.0.est_fare': fare,
       },
       $push: {
          previous_destination: oldDest
@@ -477,6 +578,8 @@ trip.updateDestination = async (ws, payload) => {
 trip.delayRide = async (ws, payload) => {
    let trip_id = helpers.getInputValueString(payload, 'trip_id')
    let rider_id = helpers.getInputValueString(payload, 'rider_id')
+   // console.log(payload)
+   //send the request to the user
    if (socketUser.online[rider_id]) {
       helpers.outputResponse(ws, {
          action: requestAction.delayRideRequest,
@@ -484,6 +587,39 @@ trip.delayRide = async (ws, payload) => {
          rider_id,
          driver_id: ws._user_data.token,
       }, socketUser.online[rider_id])
+   }
+}
+
+//for delaying a ride
+trip.rejectDelayRide = async (ws, payload) => {
+   let trip_id = helpers.getInputValueString(payload, 'trip_id')
+   let driver_id = helpers.getInputValueString(payload, 'driver_id')
+   // console.log(payload)
+   if (!driver_id || driver_id.length < 2) {
+      return helpers.outputResponse(ws, {
+         action: requestAction.inputError,
+         error: "Driver's ID is required"
+      })
+   }
+
+   //if the driver's phone is reachable
+   if (socketUser.online[driver_id]) {
+      //send the request to the driver
+      helpers.outputResponse(ws, {
+         action: requestAction.riderRejectDelayRide,
+         trip_id,
+         rider_id: ws._user_data.token,
+      }, socketUser.online[driver_id])
+      //reply the rider
+      helpers.outputResponse(ws, {
+         action: requestAction.riderRejectDelayRide,
+         trip_id,
+      })
+   } else {
+      helpers.outputResponse(ws, {
+         action: requestAction.inputError,
+         error: "Driver's phone is unreachable"
+      })
    }
 }
 
@@ -495,27 +631,45 @@ trip.acceptDelayRide = async (ws, payload) => {
    if (!trip_id || trip_id.length !== 24) {
       return helpers.outputResponse(ws, { action: requestAction.inputError, error: "Trip id is required" })
    }
-   if (!driver_id || trip_id.length < 5) {
+   if (!driver_id || driver_id.length < 5) {
       return helpers.outputResponse(ws, { action: requestAction.inputError, error: "Driver id is required" })
    }
 
-   //update the trip to delay
-   //update the data to arrive pickup
-   let updateData = await tripModel.TripRequests.findOneAndUpdate({ _id: trip_id },
-      { ride_status: "delay", $set: { 'riders.0.delay_trip_at': new Date().toISOString() } },
-      { new: true, lean: true }).catch(e => ({ error: e }))
-
-   //check if it's not updated
-   if (!updateData || updateData.error) {
-      return helpers.outputResponse(ws, { action: requestAction.inputError, error: "Could not delay ride" })
-      //do somthing here
-   }
-
+   //send the response to the driver and the user
    if (socketUser.online[driver_id]) {
+      //update the trip to delay
+      let t = new Date().toISOString()
+      //update the data to arrive pickup
+      let updateData = await tripModel.TripRequests.findOneAndUpdate({ _id: trip_id },
+         {
+            ride_status: "delay",
+            $set: {
+               'riders.0.delay_trip_at': t,
+               'riders.0.action': requestAction.delayRideRequestAccepted
+            }
+         },
+         { new: true, lean: true }).catch(e => ({ error: e }))
+
+      //check if it's not updated
+      if (!updateData || updateData.error) {
+         return helpers.outputResponse(ws, { action: requestAction.inputError, error: "Could not delay ride" })
+         //do somthing here
+      }
+      //send to the driver
       helpers.outputResponse(ws, {
          action: requestAction.delayRideRequestAccepted,
          trip_id,
       }, socketUser.online[driver_id])
+      //send to the rider
+      helpers.outputResponse(ws, {
+         action: requestAction.delayRideRequestAccepted,
+         trip_id, delay_trip_at: t
+      })
+   } else {
+      helpers.outputResponse(ws, {
+         action: requestAction.inputError,
+         error: "Driver's phone is unreachable"
+      })
    }
 }
 
@@ -532,6 +686,39 @@ trip.continueDelayRide = async (ws, payload) => {
       }, socketUser.online[rider_id])
    }
 }
+
+//for delaying a ride
+trip.rejectContinueDelayRide = async (ws, payload) => {
+   let trip_id = helpers.getInputValueString(payload, 'trip_id')
+   let driver_id = helpers.getInputValueString(payload, 'driver_id')
+   // console.log(payload)
+   if (!driver_id || driver_id.length < 2) {
+      return helpers.outputResponse(ws, {
+         action: requestAction.inputError,
+         error: "Driver's ID is required"
+      })
+   }
+   //send the request to the user
+   if (socketUser.online[driver_id]) {
+      //send the request to the driver
+      helpers.outputResponse(ws, {
+         action: requestAction.riderRejectContinueDelayRide,
+         trip_id,
+         rider_id: ws._user_data.token,
+      }, socketUser.online[driver_id])
+      //reply the rider
+      helpers.outputResponse(ws, {
+         action: requestAction.riderRejectContinueDelayRide,
+         trip_id,
+      })
+   } else {
+      helpers.outputResponse(ws, {
+         action: requestAction.inputError,
+         error: "Driver's phone is unreachable"
+      })
+   }
+}
+
 //for a rider to continue a delay ride
 trip.acceptContinueDelayRide = async (ws, payload) => {
    let trip_id = helpers.getInputValueString(payload, 'trip_id')
@@ -540,26 +727,36 @@ trip.acceptContinueDelayRide = async (ws, payload) => {
    if (!trip_id || trip_id.length !== 24) {
       return helpers.outputResponse(ws, { action: requestAction.inputError, error: "Trip id is required" })
    }
-   if (!driver_id || trip_id.length < 5) {
+   if (!driver_id || driver_id.length < 5) {
       return helpers.outputResponse(ws, { action: requestAction.inputError, error: "Driver id is required" })
    }
 
-   //update the trip to delay
-   //update the data to arrive pickup
-   let updateData = await tripModel.TripRequests.findOneAndUpdate({ _id: trip_id },
-      { ride_status: "on_ride", 'riders.0.stage': 3, }, { new: true, lean: true }).catch(e => ({ error: e }))
-
-   //check if it's not updated
-   if (!updateData || updateData.error) {
-      return helpers.outputResponse(ws, { action: requestAction.inputError, error: "Could not delay ride" })
-      //do somthing here
-   }
-
    if (socketUser.online[driver_id]) {
+      //update the trip to delay
+      //update the data to arrive pickup
+      let updateData = await tripModel.TripRequests.findOneAndUpdate({ _id: trip_id },
+         { ride_status: "on_ride", 'riders.0.stage': 3, 'riders.0.action': requestAction.driverStartTripSuccess }, { new: true, lean: true }).catch(e => ({ error: e }))
+
+      //check if it's not updated
+      if (!updateData || updateData.error) {
+         return helpers.outputResponse(ws, { action: requestAction.inputError, error: "Could not delay ride" })
+         //do somthing here
+      }
+      //send to the driver
       helpers.outputResponse(ws, {
-         action: requestAction.delayRideRequestAccepted,
+         action: requestAction.continueRideRequestAccepted,
          trip_id,
       }, socketUser.online[driver_id])
+      //send to the user
+      helpers.outputResponse(ws, {
+         action: requestAction.continueRideRequestAccepted,
+         trip_id,
+      })
+   } else {
+      helpers.outputResponse(ws, {
+         action: requestAction.inputError,
+         error: "Driver's phone is unreachable"
+      })
    }
 }
 
@@ -589,7 +786,7 @@ trip.cancelRequest = async (ws, payload) => {
       }
       //if a driver cancels a request, search for another driver
       if (userType === 'driver') {
-         tripRidersMethod['RequestClass' + rData.class](rData.ws, rData, rData.driver)
+         riderMethod['RequestClass' + rData.class](rData.ws, rData, rData.driver)
          helpers.outputResponse(ws, { action: requestAction.tripCancelSuccessfully, rider_id })
       } else {
          //send cancel event to driver's if request was sent
@@ -668,7 +865,6 @@ trip.getPendingTrip = async (ws, payload) => {
       return helpers.outputResponse(ws, { action: requestAction.inputError, error: "A valid trip id is required" })
    }
    //find the trip
-   // let getTrip = await tripModel.TripRequests.findOne({ _id: trip_id }, { riders: 1, ride_status: 1, ride_class: 1 }).catch(e => ({ error: e }))
    let getTrip = await tripModel.TripRequests.aggregate([
       { $match: { _id: dbConnector.mongoose.Types.ObjectId(trip_id) } },
       {
@@ -684,6 +880,7 @@ trip.getPendingTrip = async (ws, payload) => {
             riders: 1,
             ride_status: 1,
             ride_class: 1,
+            ride_class_complete: 1,
             driver_data: 1
          }
       }
@@ -692,6 +889,231 @@ trip.getPendingTrip = async (ws, payload) => {
       return
    }
    helpers.outputResponse(ws, { action: requestAction.pendingTrip, data: getTrip })
+}
+
+//function to handle a re-requesting of a driver when on a request
+trip.driverOnRequest = async (ws, payload) => {
+   let rider_id = helpers.getInputValueString(payload, 'rider_id')
+   let driver_id = helpers.getInputValueString(payload, 'driver_id')
+   //check if the request has been canceled
+   if (!socketUser.pendingTrip[rider_id]) { return }
+   //check if there's no driver ID
+   if (!driver_id || driver_id.length < 5) { return }
+   //if the request has been tried twice, don't try again
+   if (payload.trial === 2) { return }
+   //get the pending data
+   let getPendData = socketUser.pendingTrip[rider_id]
+   let sendData = {
+      ...getPendData,
+      action: requestAction.newTripRequest,
+      trial: 2,
+      driver: undefined,
+      request_time: undefined,
+      ws: undefined
+   }
+   //clear the timer request
+   clearTimeout(socketUser.requestDriverTimer[rider_id])
+   delete socketUser.requestDriverTimer[rider_id] //remove from the object
+   //open another wait time to check on the driver
+   setTimeout(() => {
+      helpers.outputResponse(ws, sendData)
+      riderMethod.requestDriverWaitFor30Sec(rider_id, getPendData.ws)
+   }, 6000);
+
+}
+
+//function to send ride request/share invite
+trip.shareRideInvite = async (ws, payload) => {
+   let phone = helpers.getInputValueString(payload, "invitee_phone")
+   let name = helpers.getInputValueString(payload, "name")
+   let token = helpers.getInputValueString(payload, "token")
+   let startLon = helpers.getInputValueNumber(payload, "start_lon")
+   let startLat = helpers.getInputValueNumber(payload, "start_lat")
+   let endLon = helpers.getInputValueNumber(payload, "end_lon")
+   let endLat = helpers.getInputValueNumber(payload, "end_lat")
+   let startAddr = helpers.getInputValueString(payload, "start_address")
+   let endAddr = helpers.getInputValueString(payload, "end_address")
+   let rideClass = helpers.getInputValueString(payload, "class")
+
+   //check the name
+   if (!name) {
+      return helpers.outputResponse(ws, {
+         action: requestAction.inputError,
+         error: "Name is required"
+      })
+   }
+
+   //check the longitude 
+   if (!startLon || isNaN(startLon) || !startLat || isNaN(startLat)) {
+      return helpers.outputResponse(ws, {
+         action: requestAction.inputError,
+         error: "Start longitude and latitude are required"
+      })
+   }
+   //check the longitude 
+   if (!endLon || isNaN(endLon) || !endLat || isNaN(endLat)) {
+      return helpers.outputResponse(ws, {
+         action: requestAction.inputError,
+         error: "End longitude and latitude are required"
+      })
+   }
+   //check the phone number
+   if (!startAddr || !endAddr) {
+      return helpers.outputResponse(ws, {
+         action: requestAction.inputError,
+         error: "start and end addresses are required"
+      })
+   }
+   if (["B", "C", "D"].indexOf(rideClass) === -1) {
+      return helpers.outputResponse(ws, {
+         action: requestAction.inputError,
+         error: "Ride class is required. B, C or D"
+      })
+   }
+   //check the phone number
+   if (!phone || phone.length !== 11) {
+      return helpers.outputResponse(ws, {
+         action: requestAction.inputError,
+         error: "Invitee phone number is required"
+      })
+   }
+   //check the phone number
+   if (!token) {
+      return helpers.outputResponse(ws, {
+         action: requestAction.inputError,
+         error: "Token is required"
+      })
+   }
+   //get the data from the server
+   let getUser = await helpers.makeHTTPRequest({
+      uri: `http://taxipassengerbackend-microservices.apps.waaron.com/api/passengers/${phone}`,
+      method: "GET", headers: { "Authorization": token }
+   })
+   let inviteeData;
+   try {
+      inviteeData = typeof getUser === "object" ? getUser : JSON.parse(getUser)
+   } catch (e) {
+      return helpers.outputResponse(ws, {
+         action: requestAction.inputError,
+         error: "Invitee data not found"
+      })
+   }
+   //check if the data no found
+   if (!inviteeData || !inviteeData.authId) {
+      return helpers.outputResponse(ws, {
+         action: requestAction.inputError,
+         error: "Invitee data not found"
+      })
+   }
+   //send 
+   let sendData = {
+      ...payload,
+      action: requestAction.rideInvitation,
+      host_id: ws._user_data.token,
+   }
+   //if the invitee is online
+   if (socketUser.online[inviteeData.authId]) {
+      helpers.outputResponse(ws, sendData, socketUser.online[inviteeData.authId])
+      helpers.outputResponse(ws, {
+         action: requestAction.rideInvitationSent,
+         invitee_phone: phone, class: payload.class
+      })
+   } else {
+      helpers.outputResponse(ws, {
+         action: requestAction.inputError,
+         error: "The user is not reachable at the moment. Please ensure the user has his/her Lagos Ride App opened"
+      })
+   }
+}
+
+trip.acceptRideInvite = async (ws, payload) => {
+
+   let phone = helpers.getInputValueString(payload, "phone")
+   let name = helpers.getInputValueString(payload, "name")
+   let host_id = helpers.getInputValueString(payload, "host_id")
+
+   //check the phone number
+   if (!phone || phone.length !== 11) {
+      return helpers.outputResponse(ws, {
+         action: requestAction.inputError,
+         error: "Phone number is required"
+      })
+   }
+   //check the phone number
+   if (!name) {
+      return helpers.outputResponse(ws, {
+         action: requestAction.inputError,
+         error: "Name is required"
+      })
+   }
+   if (!host_id) {
+      return helpers.outputResponse(ws, {
+         action: requestAction.inputError,
+         error: "Host id is required"
+      })
+   }
+   let sendData = {
+      ...payload,
+      action: requestAction.riderAcceptRideInvite,
+      rider_id: ws._user_data.token,
+   }
+   //check if the host is online
+   if (socketUser.online[host_id]) {
+      helpers.outputResponse(ws, sendData, socketUser.online[host_id])
+      helpers.outputResponse(ws, {
+         action: requestAction.riderAcceptRideInviteSuccessfully,
+      })
+   } else {
+      helpers.outputResponse(ws, {
+         action: requestAction.inputError,
+         error: "The host is not reachable at the moment"
+      })
+   }
+}
+
+trip.cancelRideInvite = async (ws, payload) => {
+
+   let phone = helpers.getInputValueString(payload, "phone")
+   let name = helpers.getInputValueString(payload, "name")
+   let host_id = helpers.getInputValueString(payload, "host_id")
+
+   //check the phone number
+   if (!phone || phone.length !== 11) {
+      return helpers.outputResponse(ws, {
+         action: requestAction.inputError,
+         error: "Phone number is required"
+      })
+   }
+   //check the phone number
+   if (!name) {
+      return helpers.outputResponse(ws, {
+         action: requestAction.inputError,
+         error: "Name is required"
+      })
+   }
+   if (!host_id) {
+      return helpers.outputResponse(ws, {
+         action: requestAction.inputError,
+         error: "Host id is required"
+      })
+   }
+   let sendData = {
+      ...payload,
+      action: requestAction.riderCancelRideInvite,
+      invitee_phone: phone,
+   }
+   //check if the host is online
+   if (socketUser.online[host_id]) {
+      helpers.outputResponse(ws, sendData, socketUser.online[host_id])
+      helpers.outputResponse(ws, {
+         action: requestAction.riderCancelRideInviteSuccessfully,
+      })
+   } else {
+      helpers.outputResponse(ws, {
+         action: requestAction.inputError,
+         error: "The host is not reachable at the moment"
+      })
+   }
 }
 
 module.exports = trip;
