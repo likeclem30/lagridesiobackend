@@ -5,7 +5,7 @@ const helpers = {};
 
 helpers.zenoTripDBLocal = "mongodb://localhost:27017/zeno_trip";
 helpers.zenoTripDBLive =
-  "mongodb://lagridemdb:lagridemdb@172.30.218.218:27017/lagridemdb";
+  "mongodb://lagridemdb:lagridemdb@172.30.19.186:27017/lagridemdb";
 
 // for generating token
 const randomToken =
