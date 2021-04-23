@@ -1018,22 +1018,19 @@ trip.getEstimatedFare = (ws, payload) => {
 
 //function to get a pending trip
 trip.getPendingTrip = async (ws, payload) => {
-   let trip_id = helpers.getInputValueString(payload, 'trip_id')
-   //check the trip id
-   if (!trip_id || trip_id.length !== 24) {
-      return helpers.outputResponse(ws, { action: requestAction.inputError, error: "A valid trip id is required" })
+   // let trip_id = helpers.getInputValueString(payload, 'trip_id')
+   let userData = ws._user_data
+   let queryBuilder = {}
+   //if the user is a rider, and a check to ensure the user did not cancel trip
+   if (userData.user_type === "user") {
+      queryBuilder.riders = { $elemMatch: { rider_id: userData.token } }
    }
+   //add the over all ride status
+   queryBuilder.ride_status = { $nin: ["cancel", "completed"] }
+
    //find the trip
    let getTrip = await tripModel.TripRequests.aggregate([
-      { $match: { _id: dbConnector.mongoose.Types.ObjectId(trip_id) } },
-      {
-         $lookup: {
-            from: "drivers",
-            localField: "driver_id",
-            foreignField: "user_id",
-            as: "driver_data"
-         }
-      },
+      { $match: queryBuilder },
       {
          $project: {
             riders: 1,
@@ -1042,7 +1039,9 @@ trip.getPendingTrip = async (ws, payload) => {
             ride_class_complete: 1,
             driver_data: 1
          }
-      }
+      },
+      { $sort: { createdAt: -1 } },
+      { $limit: 1 }
    ])
    if (getTrip && getTrip.error) {
       return
